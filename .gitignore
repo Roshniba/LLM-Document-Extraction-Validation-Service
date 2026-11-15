@@ -1,0 +1,20 @@
+.DS_STORE
+*.pyc
+logs*
+*.log
+__pycache__
+
+test_*.py
+test_*
+.venv
+.env
+*.egg-info
+.idea
+
+# Local llama.cpp / Hugging Face model caches and smoke-test scratch data
+.smoke_cache/
+**/.llama_cache/
+
+# The blanket test_* rules above are meant for scratch files; keep the actual
+# test modules under the tests packages tracked.
+!webapp/**/tests/test_*.py

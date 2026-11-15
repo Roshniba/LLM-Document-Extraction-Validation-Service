@@ -1,0 +1,80 @@
+# syntax=docker/dockerfile:1
+#
+# LLMAIx CUDA (NVIDIA GPU) image.
+#
+# Based on the official prebuilt llama.cpp CUDA server image instead of
+# compiling llama.cpp from source. Requires the NVIDIA Container Toolkit on the
+# host (run with `--gpus all`). The upstream image ships the server binary at
+# /app/llama-server.
+#
+# Pin the upstream llama.cpp build. Bump this to re-test against a newer build.
+# Verify tags at: https://github.com/orgs/ggml-org/packages/container/package/llama.cpp
+ARG LLAMACPP_IMAGE=ghcr.io/ggml-org/llama.cpp:server-cuda-b10068
+
+FROM ${LLAMACPP_IMAGE}
+
+# The upstream image sets ENTRYPOINT ["/app/llama-server"]. Clear it so the
+# LLMAIx Python application starts instead; LLMAIx launches llama-server itself.
+ENTRYPOINT []
+
+# Install LLMAIx system dependencies (OCR stack + Python toolchain) on top of
+# the official image.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    python3.12 \
+    python3.12-dev \
+    python3.12-venv \
+    pngquant \
+    tesseract-ocr-* \
+    ocrmypdf \
+    libjpeg-dev \
+    libxml2 \
+    libxslt1-dev \
+    build-essential \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# The official image keeps llama.cpp shared libraries in /app and registers
+# them with ldconfig. Installing packages above re-runs ldconfig from
+# /etc/ld.so.conf and drops /app, so re-register it permanently here.
+RUN echo "/app" > /etc/ld.so.conf.d/llama-cpp.conf && ldconfig
+
+WORKDIR /llmaix
+ENV PYTHONPATH=/llmaix/.venv/lib/python3.12/site-packages
+ENV PATH="/root/.local/bin:$PATH"
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    uv venv && \
+    . .venv/bin/activate && \
+    uv pip install wheel setuptools
+
+# Install only the third-party dependencies (not the local project) so this
+# layer stays cached across source changes. LLMAIx runs from the copied source.
+COPY pyproject.toml uv.lock ./
+RUN . .venv/bin/activate && uv sync --no-install-project --no-dev
+
+COPY . .
+
+# LLMAIx spawns llama-server per model, so it manages host/port via CLI flags.
+ENV LLAMA_ARG_HOST=0.0.0.0
+
+# Cache Hugging Face model downloads (-hf) inside the mounted /models volume so
+# they persist across container restarts. Override with -e LLAMA_CACHE=... .
+ENV LLAMA_CACHE=/models/.llama_cache
+
+# surya-ocr (>= 0.22) runs its OCR model through a llama-server binary; point
+# it at the one bundled in this image. Its GGUF download goes through
+# huggingface_hub, so keep that cache in the /models volume as well.
+ENV LLAMA_CPP_BINARY=/app/llama-server
+ENV HF_HOME=/models/.hf_cache
+
+# LLMAIx web app port (llama.cpp stays internal to the container).
+EXPOSE 5000
+
+# Health-check the always-on LLMAIx web app. The internal llama.cpp server is
+# only up while a model is loaded and its readiness is handled in-app.
+HEALTHCHECK CMD [ "curl", "-fsS", "http://localhost:5000/", "-o", "/dev/null" ]
+
+CMD [".venv/bin/python", "app.py", "--server_path", "/app/llama-server", "--model_path", "/models"]

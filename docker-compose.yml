@@ -1,0 +1,41 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile_cpu
+    # CPU image: runs on linux/amd64 and linux/arm64 (incl. Docker Desktop on
+    # Apple Silicon). For NVIDIA GPUs use docker-compose-cuda.yml instead.
+    image: ghcr.io/katherlab/llmaix-cpu:latest
+    ports:
+      - "19999:${PORT:-5000}"
+    volumes:
+      # Default: named volume that persists Hugging Face model downloads
+      # (the bundled config.yml pulls its model from Hugging Face automatically).
+      # To use your own local model files + config instead, replace with a bind
+      # mount (- /path/to/your/local/model/dir:/models) and set
+      # CONFIG_FILE=/models/config.yml below.
+      - llmaix_models:/models
+    environment:
+      # Path to the llama-server binary inside the official image. Don't change.
+      - SERVER_PATH=${SERVER_PATH:-/app/llama-server}
+      - PORT=${PORT:-5000}
+      - HOST=${HOST:-0.0.0.0}
+      # Default: config.yml bundled with the image (Hugging Face model, auto-downloaded).
+      # Set to /models/config.yml to use your own config from a mounted models directory.
+      - CONFIG_FILE=${CONFIG_FILE:-/llmaix/config.yml}
+      - GPU=${GPU:-ALL}
+      # Hugging Face token for gated/private repos used via hf_repo in config.yml (optional).
+      - HF_TOKEN=${HF_TOKEN:-}
+      - LLAMACPP_PORT=${LLAMACPP_PORT:-2929}
+      - DEBUG=${DEBUG:-false}
+      - MODE=${MODE:-choice}
+      - VERBOSE_LLAMA=${VERBOSE_LLAMA:-false}
+      # Set a password here if you want to protect the API (e.g. - PASSWORD:-llmaixpassword). If you set a password, the username is llmaix
+      - PASSWORD=${PASSWORD:-}
+      # Adjust the API URL and Key (e.g. - API_URL:-http://localhost:5000 - API_KEY:-someapikey)
+      - API_URL=${API_URL:-}
+      - API_KEY=${API_KEY:-}
+      - ONLY_API=${ONLY_API:-false} # if true, a local model config will not be checked
+
+volumes:
+  llmaix_models:
